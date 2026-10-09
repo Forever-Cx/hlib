@@ -199,7 +199,7 @@
     { "name": "domain_dialog_onion_copy",   "value": "复制 Tor 地址" },
     { "name": "domain_dialog_onion_copied", "value": "已复制 .onion 地址，请用 Tor Browser 打开" },
 
-    { "name": "settings_proxy_title",      "value": "应用内代理" },
+    { "name": "settings_proxy_title",      "value": "代理" },
     { "name": "settings_proxy_enable",     "value": "启用代理" },
     { "name": "settings_proxy_scheme",     "value": "代理协议" },
     { "name": "settings_proxy_host",       "value": "代理地址" },
@@ -223,6 +223,12 @@
     { "name": "settings_proxy_err_unsupported", "value": "系统不支持该代理协议" },
     { "name": "settings_proxy_err_unknown_fmt", "value": "连接失败：%s" },
     { "name": "settings_proxy_note",       "value": "代理由你自行提供（自建 VPS / Clash 本地端口等）；账号密码经系统密钥库加密存储，不会写入日志；SOCKS5 走系统 RCP 通道" },
+
+    { "name": "splash_network_settings",   "value": "网络设置" },
+    { "name": "proxy_setup_title",         "value": "配置代理" },
+    { "name": "proxy_setup_hint",          "value": "应用连不上网时，可先在这里配置代理" },
+    { "name": "proxy_setup_saved",         "value": "已保存，正在重新连接…" },
+    { "name": "proxy_setup_probe_fmt",     "value": "探测地址：%s" },
 
     { "name": "settings_manifest_title",      "value": "在线同步镜像列表" },
     { "name": "settings_manifest_enable",     "value": "启用同步" },

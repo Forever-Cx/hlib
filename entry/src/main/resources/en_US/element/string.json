@@ -199,7 +199,7 @@
     { "name": "domain_dialog_onion_copy",   "value": "Copy Tor address" },
     { "name": "domain_dialog_onion_copied", "value": ".onion URL copied. Open with Tor Browser." },
 
-    { "name": "settings_proxy_title",      "value": "In-app proxy" },
+    { "name": "settings_proxy_title",      "value": "Proxy" },
     { "name": "settings_proxy_enable",     "value": "Enable proxy" },
     { "name": "settings_proxy_scheme",     "value": "Protocol" },
     { "name": "settings_proxy_host",       "value": "Host" },
@@ -223,6 +223,12 @@
     { "name": "settings_proxy_err_unsupported", "value": "This proxy protocol is not supported" },
     { "name": "settings_proxy_err_unknown_fmt", "value": "Connection failed: %s" },
     { "name": "settings_proxy_note",       "value": "Bring your own (VPS / local Clash port / etc.). Credentials are encrypted with the system keystore and never logged; SOCKS5 uses the system RCP channel" },
+
+    { "name": "splash_network_settings",   "value": "Network settings" },
+    { "name": "proxy_setup_title",         "value": "Configure proxy" },
+    { "name": "proxy_setup_hint",          "value": "If the app can't reach the network, set up a proxy here first" },
+    { "name": "proxy_setup_saved",         "value": "Saved, reconnecting…" },
+    { "name": "proxy_setup_probe_fmt",     "value": "Probe: %s" },
 
     { "name": "settings_manifest_title",      "value": "Sync mirror list online" },
     { "name": "settings_manifest_enable",     "value": "Enable sync" },

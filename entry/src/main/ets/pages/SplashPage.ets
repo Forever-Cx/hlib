@@ -11,10 +11,11 @@
 
 import { common } from '@kit.AbilityKit';
 import { AppColors } from '../theme/AppColors';
-import { AppFontSize, AppSpace } from '../theme/AppTextStyles';
+import { AppFontSize, AppRadius, AppSpace } from '../theme/AppTextStyles';
 import { AppStorageKeys, PRIVACY_POLICY_VERSION } from '../storage/AppStorageKeys';
 import { Logger } from '../utils/Logger';
 import { HttpClient } from '../api/HttpClient';
+import { ProxySetupDialog } from '../components/ProxySetupDialog';
 import { DomainManifest } from '../api/DomainManifest';
 import { AuthVM } from '../viewmodel/AuthVM';
 import { SpeedTestVM } from '../viewmodel/SpeedTestVM';
@@ -82,6 +83,31 @@ export struct SplashPage {
     AppStorage.setOrCreate<string>(AppStorageKeys.PRIVACY_AGREED_VERSION, PRIVACY_POLICY_VERSION);
     Logger.i(TAG, `privacy consent accepted (v=${PRIVACY_POLICY_VERSION})`);
     this.bootstrap();
+  }
+
+  /**
+   * 代理配置弹窗。
+   * 为什么启动屏就要有：网络不通时应用根本进不到设置页，用户会卡在这里出不去。
+   * 配好并保存后立刻生效（HttpClient 无需重启），随后重新走一遍 bootstrap。
+   */
+  private proxyDialog: CustomDialogController = new CustomDialogController({
+    builder: ProxySetupDialog({
+      onApplied: (): void => this.onProxyApplied(),
+    }),
+    autoCancel: true,
+    alignment: DialogAlignment.Center,
+    customStyle: true,
+  });
+
+  /** 标记 bootstrap 是否已经跑完，避免代理保存后重复跳转。 */
+  private bootstrapped: boolean = false;
+
+  /** 启动屏里配好代理并保存 → 立即重试启动流程。 */
+  private onProxyApplied(): void {
+    Logger.i(TAG, 'proxy configured from splash, retrying bootstrap');
+    this.bootstrap().catch((e: Object): void => {
+      Logger.w(TAG, `retry bootstrap failed: ${(e as Error).message}`);
+    });
   }
 
   /** 用户点击"查看完整政策" → 弹窗已被组件自身关闭，这里负责跳转 PrivacyPage。 */
@@ -165,6 +191,7 @@ export struct SplashPage {
       await AuthVM.restoreFromStorage();
     }
     const target: string = Routes.MAIN;
+    this.bootstrapped = true;
     Logger.i(TAG, `redirect to ${target}`);
     AppRouter.replace(target);
   }
@@ -251,6 +278,19 @@ export struct SplashPage {
 
         Column() {
           Blank();
+          // 启动阶段就能配代理：网络不通时用户进不去设置页，必须有这个出口
+          Button($r('app.string.splash_network_settings'))
+            .height(36)
+            .padding({ left: 18, right: 18 })
+            .fontSize(AppFontSize.bodySm)
+            .fontColor('#CCFFFFFF')
+            .backgroundColor('#1FFFFFFF')
+            .borderRadius(AppRadius.pill)
+            .alignSelf(ItemAlign.Center)
+            .margin({ bottom: 14 })
+            .onClick((): void => {
+              this.proxyDialog.open();
+            });
           Text(`v${this.appVersion.length > 0 ? this.appVersion : '1.0.0'}`)
             .fontSize(AppFontSize.overline)
             .fontColor('#66FFFFFF')

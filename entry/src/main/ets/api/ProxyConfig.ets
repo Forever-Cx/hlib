@@ -47,6 +47,18 @@ export const PROXY_SCHEMES: ProxyScheme[] = ['http', 'https', 'socks5'];
 
 /** 默认连接超时（ms）。 */
 export const PROXY_DEFAULT_TIMEOUT_MS: number = 10000;
+
+/**
+ * 连通性探测地址（依次尝试，任一成功即判定代理可用）。
+ *
+ * 刻意不使用业务域名（Z-Library 镜像等）：那些域名本身在某些网络/地区就不可达，
+ * 用它做探针会把"代理通、业务域名被阻断"误判成"代理不可达"。
+ * 这里选两个与业务无关、全球/国内都常见的公网地址。
+ */
+export const PROXY_TEST_URLS: string[] = [
+  'https://www.cloudflare.com/cdn-cgi/trace',
+  'https://www.baidu.com',
+];
 /** 连接超时下限，避免用户填 0 导致立即失败。 */
 const MIN_TIMEOUT_MS: number = 1000;
 /** 连接超时上限。 */

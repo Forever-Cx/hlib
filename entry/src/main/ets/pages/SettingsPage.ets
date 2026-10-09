@@ -32,7 +32,6 @@ import { DomainManifest } from '../api/DomainManifest';
 import {
   ProxyConfig,
   ProxyScheme,
-  ProxyErrorKind,
   PROXY_DEFAULT_TIMEOUT_MS,
 } from '../api/ProxyConfig';
 import { ProxyStore } from '../api/ProxyStore';
@@ -1154,10 +1153,14 @@ export struct SettingsPage {
       const draft: ProxyConfig = this.buildProxyDraft();
       // 测试时强制按"启用"处理：即便总开关还关着，也要能验证这份配置本身能不能用
       draft.enabled = true;
-      const domain: string = HttpClient.instance.getDomain();
-      const target: string = `https://${domain}/eapi/info/languages`;
-      const r: ProxyTestResult = await ProxyTester.test(draft, target);
-      this.proxyTestHint = SettingsPage.proxyTestMessage(r);
+      // 不传探测地址 → 使用 PROXY_TEST_URLS（与业务无关的中立地址），
+      // 避免"代理通但业务域名被阻断"被误判成"代理不可达"
+      const r: ProxyTestResult = await ProxyTester.test(draft);
+      this.proxyTestHint = ProxyTester.messageOf(r);
+      if (!r.ok && r.probeUrl.length > 0) {
+        this.proxyTestHint =
+          `${this.proxyTestHint}\n${I18n.format('proxy_setup_probe_fmt', [r.probeUrl])}`;
+      }
       SettingsPage.toast(this.proxyTestHint);
     } catch (e) {
       Logger.w(TAG, `testProxy failed: ${(e as Error).message}`);
@@ -1168,34 +1171,6 @@ export struct SettingsPage {
     }
   }
 
-  /** 把测试结果翻译成面向用户的文案（区分认证失败 / 不可达 / 超时 / 解析失败等）。 */
-  private static proxyTestMessage(r: ProxyTestResult): string {
-    if (r.ok) {
-      return I18n.format('settings_proxy_test_ok_fmt', [r.latencyMs]);
-    }
-    const kind: ProxyErrorKind = r.kind;
-    if (kind === 'invalid') {
-      return I18n.ts('settings_proxy_err_invalid');
-    }
-    if (kind === 'auth') {
-      return I18n.ts('settings_proxy_err_auth');
-    }
-    if (kind === 'timeout') {
-      return I18n.ts('settings_proxy_err_timeout');
-    }
-    if (kind === 'dns') {
-      return I18n.ts('settings_proxy_err_dns');
-    }
-    if (kind === 'unsupported') {
-      return I18n.ts('settings_proxy_err_unsupported');
-    }
-    if (kind === 'connect') {
-      return I18n.ts('settings_proxy_err_connect');
-    }
-    return r.detail.length > 0
-      ? I18n.format('settings_proxy_err_unknown_fmt', [r.detail])
-      : I18n.ts('settings_proxy_err_connect');
-  }
 
   // ── 镜像同步 Actions ──
 

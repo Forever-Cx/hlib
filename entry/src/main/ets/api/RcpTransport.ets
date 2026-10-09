@@ -53,9 +53,13 @@ export class RcpTransport {
       transfer: transfer,
     };
     const sessionConfig: rcp.SessionConfiguration = { requestConfiguration: configuration };
-    const session: rcp.Session = rcp.createSession(sessionConfig);
 
+    // createSession 自身也可能抛（参数非法 / 初始化失败），必须放在 try 内
+    let session: rcp.Session | null = null;
     try {
+      const created: rcp.Session = rcp.createSession(sessionConfig);
+      session = created;
+
       const method: rcp.HttpMethod = p.method === 'POST' ? 'POST' : 'GET';
 
       const reqHeaders: rcp.RequestHeaders = {};
@@ -70,7 +74,7 @@ export class RcpTransport {
       }
 
       const req: rcp.Request = new rcp.Request(p.url, method, reqHeaders, content);
-      const resp: rcp.Response = await session.fetch(req);
+      const resp: rcp.Response = await created.fetch(req);
 
       const headersOut: Record<string, string | string[]> = {};
       const respHeaders: rcp.ResponseHeaders = resp.headers;
@@ -89,10 +93,13 @@ export class RcpTransport {
       };
       return out;
     } finally {
-      try {
-        session.close();
-      } catch {
-        // close 失败不影响请求结果，忽略
+      if (session !== null) {
+        const opened: rcp.Session = session;
+        try {
+          opened.close();
+        } catch {
+          // close 失败不影响请求结果，忽略
+        }
       }
     }
   }
