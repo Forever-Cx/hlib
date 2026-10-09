@@ -38,6 +38,9 @@ export struct ProxySetupDialog {
   @State private portStr: string = '';
   @State private username: string = '';
   @State private password: string = '';
+  /** 经代理直连 Z-Library 官方站（不再走镜像域名）。 */
+  @State private useOfficial: boolean = false;
+  @State private officialDomain: string = '';
   @State private testing: boolean = false;
   @State private hint: string = '';
 
@@ -54,6 +57,8 @@ export struct ProxySetupDialog {
     this.portStr = cfg.port > 0 ? cfg.port.toString() : '';
     this.username = cfg.username;
     this.password = cfg.password;
+    this.useOfficial = cfg.useOfficialDomain;
+    this.officialDomain = cfg.officialDomain;
     // 弹窗是"为了联网才打开的"，默认直接给启用态；用户已存过配置时沿用其开关状态
     this.proxyOn = cfg.host.length > 0 ? cfg.enabled : true;
   }
@@ -68,6 +73,8 @@ export struct ProxySetupDialog {
       port: isNaN(n) ? 0 : n,
       username: this.username,
       password: this.password,
+      useOfficialDomain: this.useOfficial,
+      officialDomain: this.officialDomain,
       connectTimeoutMs: PROXY_DEFAULT_TIMEOUT_MS,
     };
     return cfg;
@@ -77,6 +84,7 @@ export struct ProxySetupDialog {
     const cfg: ProxyConfig = this.draft();
     await ProxyStore.save(cfg);
     HttpClient.instance.setProxyConfig(cfg);
+    await ProxyStore.applyDomainPolicy(cfg);
     this.hint = I18n.ts('proxy_setup_saved');
     this.onApplied();
   }
@@ -241,6 +249,41 @@ export struct ProxySetupDialog {
         .alignItems(HorizontalAlign.Start);
       }
       .width('100%');
+
+      // 经代理直连 Z-Library 官方站
+      Column({ space: 6 }) {
+        Row() {
+          Text($r('app.string.settings_proxy_official_title'))
+            .fontSize(AppFontSize.bodySm)
+            .fontColor(AppColors.textPrimary)
+            .layoutWeight(1);
+          Toggle({ type: ToggleType.Switch, isOn: this.useOfficial })
+            .onChange((on: boolean): void => {
+              this.useOfficial = on;
+            });
+        }
+        .width('100%');
+
+        if (this.useOfficial) {
+          TextInput({
+            placeholder: $r('app.string.settings_proxy_official_domain_hint'),
+            text: this.officialDomain,
+          })
+            .height(40)
+            .borderRadius(AppRadius.sm)
+            .backgroundColor(AppColors.surfaceAlt)
+            .fontSize(AppFontSize.bodySm)
+            .onChange((v: string): void => {
+              this.officialDomain = v;
+            });
+          Text($r('app.string.settings_proxy_official_hint'))
+            .fontSize(AppFontSize.caption)
+            .fontColor(AppColors.textTertiary)
+            .alignSelf(ItemAlign.Start);
+        }
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start);
 
       // 测试 / 保存
       Row({ space: 8 }) {

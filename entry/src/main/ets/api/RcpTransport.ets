@@ -38,6 +38,8 @@ export interface RcpFetchParams {
   connectMs: number;
   transferMs: number;
   proxy: ProxyConfig;
+  /** 不走代理、直连的域名（可选）。 */
+  exclusions?: string[];
 }
 
 export class RcpTransport {
@@ -49,7 +51,7 @@ export class RcpTransport {
     };
     const transfer: rcp.TransferConfiguration = { timeout: timeout };
     const configuration: rcp.Configuration = {
-      proxy: toWebProxy(p.proxy),
+      proxy: toWebProxy(p.proxy, p.exclusions),
       transfer: transfer,
     };
     const sessionConfig: rcp.SessionConfiguration = { requestConfiguration: configuration };

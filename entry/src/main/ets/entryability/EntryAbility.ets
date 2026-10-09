@@ -78,6 +78,8 @@ export default class EntryAbility extends UIAbility {
       //      ProxyStore 依赖 SecretStore，必须在 1.2) 之后调用。
       const proxyCfg: ProxyConfig = await ProxyStore.load();
       HttpClient.instance.setProxyConfig(proxyCfg);
+      // 若开启「经代理直连官方站」，这里会把当前线路切到官方域名
+      await ProxyStore.applyDomainPolicy(proxyCfg);
       Logger.i(TAG, proxyCfg.enabled
         ? `applied proxy: ${describeProxy(proxyCfg)}`
         : 'applied proxy: (disabled)');

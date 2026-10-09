@@ -223,6 +223,10 @@
     { "name": "settings_proxy_err_unsupported", "value": "This proxy protocol is not supported" },
     { "name": "settings_proxy_err_unknown_fmt", "value": "Connection failed: %s" },
     { "name": "settings_proxy_note",       "value": "Bring your own (VPS / local Clash port / etc.). Credentials are encrypted with the system keystore and never logged; SOCKS5 uses the system RCP channel" },
+    { "name": "settings_proxy_official_title",       "value": "Use official Z-Library domain via proxy" },
+    { "name": "settings_proxy_official_domain",      "value": "Official domain" },
+    { "name": "settings_proxy_official_domain_hint", "value": "z-library.se" },
+    { "name": "settings_proxy_official_hint",        "value": "When on, the active line switches to this domain through the proxy; turn off to restore the mirror domain" },
 
     { "name": "splash_network_settings",   "value": "Network settings" },
     { "name": "proxy_setup_title",         "value": "Configure proxy" },

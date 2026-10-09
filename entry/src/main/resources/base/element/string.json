@@ -223,6 +223,10 @@
     { "name": "settings_proxy_err_unsupported", "value": "系统不支持该代理协议" },
     { "name": "settings_proxy_err_unknown_fmt", "value": "连接失败：%s" },
     { "name": "settings_proxy_note",       "value": "代理由你自行提供（自建 VPS / Clash 本地端口等）；账号密码经系统密钥库加密存储，不会写入日志；SOCKS5 走系统 RCP 通道" },
+    { "name": "settings_proxy_official_title",       "value": "经代理直连 Z-Library 官方站" },
+    { "name": "settings_proxy_official_domain",      "value": "官方域名" },
+    { "name": "settings_proxy_official_domain_hint", "value": "z-library.se" },
+    { "name": "settings_proxy_official_hint",        "value": "开启后，当前线路会切到该官方域名并经代理访问；关闭后自动切回原镜像域名" },
 
     { "name": "splash_network_settings",   "value": "网络设置" },
     { "name": "proxy_setup_title",         "value": "配置代理" },

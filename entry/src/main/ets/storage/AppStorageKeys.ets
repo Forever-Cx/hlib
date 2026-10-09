@@ -22,6 +22,12 @@ export class AppStorageKeys {
   static readonly PROXY_PASSWORD: string         = 'pref_proxyPassword';
   /** 代理连接超时（ms），用于连通性测试与代理通道下的请求。 */
   static readonly PROXY_TIMEOUT_MS: string       = 'pref_proxyTimeoutMs';
+  /** 启用代理时改用 Z-Library 官方域名（经代理直连），不走镜像域名。 */
+  static readonly PROXY_USE_OFFICIAL: string    = 'pref_proxyUseOfficial';
+  /** Z-Library 官方域名（不含协议），例 'z-library.se'。 */
+  static readonly ZLIB_OFFICIAL_DOMAIN: string  = 'pref_zlibOfficialDomain';
+  /** 切到官方域名前的镜像域名，用于关掉开关后切回。 */
+  static readonly ZLIB_MIRROR_DOMAIN: string    = 'pref_zlibMirrorDomain';
   static readonly DOH_ENABLED: string            = 'pref_dohEnabled';          // boolean，是否走 DoH 解析
   static readonly DOMAIN_MANIFEST_ENABLED: string = 'pref_domainManifestEnabled'; // boolean
   static readonly DOMAIN_MANIFEST_URL: string     = 'pref_domainManifestUrl';     // 远程镜像列表 URL

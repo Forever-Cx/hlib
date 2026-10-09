@@ -38,6 +38,13 @@ export interface ProxyConfig {
   username: string;
   /** 代理认证密码，可为空。禁止进入任何日志。 */
   password: string;
+  /**
+   * 启用代理时，改用 Z-Library 官方域名（经代理直连），不再走镜像域名。
+   * 典型场景：直连时官方站不可达、只能用镜像；开启代理后官方站可达，于是切回官方站。
+   */
+  useOfficialDomain: boolean;
+  /** Z-Library 官方域名（不含协议前缀），例 'z-library.se'。仅在上开关打开时生效。 */
+  officialDomain: string;
   /** 连接超时（ms），同时用于连通性测试。 */
   connectTimeoutMs: number;
 }
@@ -106,9 +113,32 @@ export function emptyProxyConfig(): ProxyConfig {
     port: 0,
     username: '',
     password: '',
+    useOfficialDomain: false,
+    officialDomain: '',
     connectTimeoutMs: PROXY_DEFAULT_TIMEOUT_MS,
   };
   return cfg;
+}
+
+/** 域名清洗：去协议、去路径、去端口、小写。 */
+export function normalizeDomain(input: string): string {
+  let d: string = input.trim().toLowerCase();
+  d = d.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '');
+  d = d.replace(/\/+$/, '');
+  const slash: number = d.indexOf('/');
+  if (slash >= 0) {
+    d = d.substring(0, slash);
+  }
+  const colon: number = d.indexOf(':');
+  if (colon >= 0) {
+    d = d.substring(0, colon);
+  }
+  return d;
+}
+
+/** 是否应切到官方域名：总开关打开 + 该功能开启 + 官方域名已填写。 */
+export function shouldUseOfficialDomain(cfg: ProxyConfig): boolean {
+  return cfg.enabled && cfg.useOfficialDomain && cfg.officialDomain.length > 0;
 }
 
 /** 把任意来源（UI 输入 / 旧版只读到 host+port）的配置整理成规范形态。 */
@@ -147,6 +177,8 @@ export function normalizeProxy(input: ProxyConfig): ProxyConfig {
     port: port,
     username: input.username.trim(),
     password: input.password,
+    useOfficialDomain: input.useOfficialDomain === true,
+    officialDomain: normalizeDomain(input.officialDomain),
     connectTimeoutMs: timeoutMs,
   };
   return out;
@@ -188,12 +220,15 @@ export function describeProxy(cfg: ProxyConfig): string {
 }
 
 /** 转成 RCP 的代理结构（socks5 与 http/https 都能表达，且支持代理认证）。 */
-export function toWebProxy(cfg: ProxyConfig): rcp.WebProxy {
+export function toWebProxy(cfg: ProxyConfig, exclusions?: string[]): rcp.WebProxy {
   const url: string = `${cfg.scheme}://${cfg.host}:${cfg.port}`;
   const webProxy: rcp.WebProxy = {
     url: url,
     createTunnel: 'auto',
   };
+  if (exclusions !== undefined && exclusions.length > 0) {
+    webProxy.exclusions = exclusions;
+  }
   if (needsAuth(cfg)) {
     const credential: rcp.Credential = {
       username: cfg.username,
@@ -215,14 +250,14 @@ export function toWebProxy(cfg: ProxyConfig): rcp.WebProxy {
  * 转成 @kit.NetworkKit 的 HttpProxy（仅 http / https 语义）。
  * socks5 无法用 http 模块表达，调用方需先判断 scheme，其它情况返回 undefined。
  */
-export function toHttpProxy(cfg: ProxyConfig): connection.HttpProxy | undefined {
+export function toHttpProxy(cfg: ProxyConfig, exclusions?: string[]): connection.HttpProxy | undefined {
   if (cfg.scheme === 'socks5') {
     return undefined;
   }
   const proxy: connection.HttpProxy = {
     host: cfg.host,
     port: cfg.port,
-    exclusionList: [],
+    exclusionList: exclusions !== undefined ? exclusions : [],
   };
   if (needsAuth(cfg)) {
     proxy.username = cfg.username;

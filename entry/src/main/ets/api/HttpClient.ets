@@ -248,6 +248,8 @@ export class HttpClient {
       port: port,
       username: base.username,
       password: base.password,
+      useOfficialDomain: base.useOfficialDomain,
+      officialDomain: base.officialDomain,
       connectTimeoutMs: base.connectTimeoutMs,
     };
     this.setProxyConfig(next);
@@ -263,6 +265,8 @@ export class HttpClient {
       port: base.port,
       username: base.username,
       password: base.password,
+      useOfficialDomain: base.useOfficialDomain,
+      officialDomain: base.officialDomain,
       connectTimeoutMs: base.connectTimeoutMs,
     };
     this.setProxyConfig(next);

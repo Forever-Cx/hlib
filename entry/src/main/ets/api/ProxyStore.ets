@@ -18,12 +18,14 @@ import { PreferencesStore } from '../storage/PreferencesStore';
 import { AppStorageKeys } from '../storage/AppStorageKeys';
 import { SecretStore } from '../utils/SecretStore';
 import { Logger } from '../utils/Logger';
+import { HttpClient } from './HttpClient';
 import {
   ProxyConfig,
   ProxyScheme,
   emptyProxyConfig,
   normalizeProxy,
   describeProxy,
+  shouldUseOfficialDomain,
 } from './ProxyConfig';
 
 const TAG: string = 'ProxyStore';
@@ -45,6 +47,12 @@ export class ProxyStore {
     );
     const timeoutMs: number = await PreferencesStore.getNumber(
       'settings', AppStorageKeys.PROXY_TIMEOUT_MS, 0,
+    );
+    const useOfficial: boolean = await PreferencesStore.getBoolean(
+      'settings', AppStorageKeys.PROXY_USE_OFFICIAL, false,
+    );
+    const officialDomain: string = await PreferencesStore.getString(
+      'settings', AppStorageKeys.ZLIB_OFFICIAL_DOMAIN, '',
     );
     const userCipher: string = await PreferencesStore.getString(
       'settings', AppStorageKeys.PROXY_USERNAME, '',
@@ -68,6 +76,8 @@ export class ProxyStore {
       port: port,
       username: username,
       password: password,
+      useOfficialDomain: useOfficial,
+      officialDomain: officialDomain,
       connectTimeoutMs: timeoutMs,
     };
     const cfg: ProxyConfig = normalizeProxy(raw);
@@ -84,6 +94,8 @@ export class ProxyStore {
     await PreferencesStore.putString('settings', AppStorageKeys.PROXY_HOST, n.host);
     await PreferencesStore.putNumber('settings', AppStorageKeys.PROXY_PORT, n.port);
     await PreferencesStore.putNumber('settings', AppStorageKeys.PROXY_TIMEOUT_MS, n.connectTimeoutMs);
+    await PreferencesStore.putBoolean('settings', AppStorageKeys.PROXY_USE_OFFICIAL, n.useOfficialDomain);
+    await PreferencesStore.putString('settings', AppStorageKeys.ZLIB_OFFICIAL_DOMAIN, n.officialDomain);
     await PreferencesStore.putString(
       'settings', AppStorageKeys.PROXY_USERNAME, await SecretStore.encrypt(n.username),
     );
@@ -111,6 +123,32 @@ export class ProxyStore {
   static async clear(): Promise<void> {
     await ProxyStore.save(emptyProxyConfig());
     Logger.i(TAG, 'cleared');
+  }
+
+  /**
+   * 应用域名策略（设置页与启动页弹窗共用，避免两处各写一份）：
+   *   开启「经代理直连官方站」→ 当前线路切到官方域名，并先把原镜像域名记下来；
+   *   关闭 → 切回记录的镜像域名。
+   */
+  static async applyDomainPolicy(cfg: ProxyConfig): Promise<void> {
+    if (shouldUseOfficialDomain(cfg)) {
+      const mirror: string = AppStorage.get<string>(AppStorageKeys.DOMAIN) ?? '';
+      if (mirror.length > 0 && mirror !== cfg.officialDomain) {
+        await PreferencesStore.putString('settings', AppStorageKeys.ZLIB_MIRROR_DOMAIN, mirror);
+        AppStorage.setOrCreate<string>(AppStorageKeys.DOMAIN, cfg.officialDomain);
+        HttpClient.instance.setDomain(cfg.officialDomain);
+        Logger.i(TAG, `domain -> official: ${cfg.officialDomain} (mirror ${mirror} saved)`);
+      }
+      return;
+    }
+    const savedMirror: string =
+      await PreferencesStore.getString('settings', AppStorageKeys.ZLIB_MIRROR_DOMAIN, '');
+    const cur: string = AppStorage.get<string>(AppStorageKeys.DOMAIN) ?? '';
+    if (savedMirror.length > 0 && cur !== savedMirror) {
+      AppStorage.setOrCreate<string>(AppStorageKeys.DOMAIN, savedMirror);
+      HttpClient.instance.setDomain(savedMirror);
+      Logger.i(TAG, `domain -> mirror: ${savedMirror}`);
+    }
   }
 
   // ─── 内部 ───

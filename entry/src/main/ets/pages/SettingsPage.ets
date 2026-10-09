@@ -33,6 +33,7 @@ import {
   ProxyConfig,
   ProxyScheme,
   PROXY_DEFAULT_TIMEOUT_MS,
+
 } from '../api/ProxyConfig';
 import { ProxyStore } from '../api/ProxyStore';
 import { ProxyTester, ProxyTestResult } from '../api/ProxyTester';
@@ -72,6 +73,9 @@ export struct SettingsPage {
   /** 代理认证账号 / 密码：仅 UI 与内存态使用，写盘前经 SecretStore 加密。 */
   @State private proxyUsername: string = '';
   @State private proxyPassword: string = '';
+  /** 启用代理时改用 Z-Library 官方域名（经代理直连），不再走镜像域名。 */
+  @State private proxyUseOfficial: boolean = false;
+  @State private proxyOfficialDomain: string = '';
   @State private proxyTesting: boolean = false;
   @State private proxyTestHint: string = '';
   @State private manifestEnabled: boolean = false;
@@ -106,6 +110,8 @@ export struct SettingsPage {
     this.proxyPortStr = proxyCfg.port > 0 ? proxyCfg.port.toString() : '';
     this.proxyUsername = proxyCfg.username;
     this.proxyPassword = proxyCfg.password;
+    this.proxyUseOfficial = proxyCfg.useOfficialDomain;
+    this.proxyOfficialDomain = proxyCfg.officialDomain;
 
     this.manifestEnabled = DomainManifest.isEnabled();
     this.manifestUrl = DomainManifest.getUrl();
@@ -792,6 +798,45 @@ export struct SettingsPage {
         }
         .width('100%');
 
+        // 经代理直连 Z-Library 官方站（不再走镜像域名）
+        Column({ space: 6 }) {
+          Row() {
+            Text($r('app.string.settings_proxy_official_title'))
+              .fontSize(AppFontSize.bodySm)
+              .fontColor(AppColors.textPrimary)
+              .layoutWeight(1);
+            Toggle({ type: ToggleType.Switch, isOn: this.proxyUseOfficial })
+              .onChange((on: boolean): void => {
+                this.proxyUseOfficial = on;
+              });
+          }
+          .width('100%');
+
+          if (this.proxyUseOfficial) {
+            Text($r('app.string.settings_proxy_official_domain'))
+              .fontSize(AppFontSize.caption)
+              .fontColor(AppColors.textSecondary)
+              .alignSelf(ItemAlign.Start);
+            TextInput({
+              placeholder: $r('app.string.settings_proxy_official_domain_hint'),
+              text: this.proxyOfficialDomain,
+            })
+              .height(40)
+              .borderRadius(AppRadius.sm)
+              .backgroundColor(AppColors.surfaceAlt)
+              .fontSize(AppFontSize.bodySm)
+              .onChange((v: string): void => {
+                this.proxyOfficialDomain = v;
+              });
+            Text($r('app.string.settings_proxy_official_hint'))
+              .fontSize(AppFontSize.caption)
+              .fontColor(AppColors.textTertiary)
+              .alignSelf(ItemAlign.Start);
+          }
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start);
+
         // 保存配置 / 测试连通性
         Row({ space: 8 }) {
           Button($r('app.string.settings_proxy_save'))
@@ -1091,6 +1136,8 @@ export struct SettingsPage {
       port: port,
       username: this.proxyUsername,
       password: this.proxyPassword,
+      useOfficialDomain: this.proxyUseOfficial,
+      officialDomain: this.proxyOfficialDomain,
       connectTimeoutMs: PROXY_DEFAULT_TIMEOUT_MS,
     };
     return draft;
@@ -1103,7 +1150,9 @@ export struct SettingsPage {
     const draft: ProxyConfig = this.buildProxyDraft();
     await ProxyStore.save(draft);
     HttpClient.instance.setProxyConfig(draft);
+    await ProxyStore.applyDomainPolicy(draft);
   }
+
 
   /** 切换协议（只改内存态，点「保存配置」才落盘）。 */
   private setProxyScheme(scheme: ProxyScheme): void {
@@ -1135,6 +1184,7 @@ export struct SettingsPage {
     const draft: ProxyConfig = this.buildProxyDraft();
     await ProxyStore.save(draft);
     HttpClient.instance.setProxyConfig(draft);
+    await ProxyStore.applyDomainPolicy(draft);
     this.proxyTestHint = '';
     SettingsPage.toastResource($r('app.string.settings_proxy_saved'));
   }
