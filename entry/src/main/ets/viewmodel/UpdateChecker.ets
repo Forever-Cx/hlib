@@ -11,11 +11,12 @@
  * 维护约定：每次发版把 update.json 的 versionCode/versionName 同步到 app.json5 与 CHANGELOG.md。
  */
 
-import { http } from '@kit.NetworkKit';
+import { connection, http } from '@kit.NetworkKit';
 import { bundleManager, common, Want } from '@kit.AbilityKit';
 import { Logger } from '../utils/Logger';
 import { PreferencesStore } from '../storage/PreferencesStore';
 import { AppStorageKeys } from '../storage/AppStorageKeys';
+import { HttpClient } from '../api/HttpClient';
 
 const TAG: string = 'UpdateChecker';
 
@@ -161,6 +162,11 @@ export class UpdateChecker {
         readTimeout: FETCH_TIMEOUT_MS,
         expectDataType: http.HttpDataType.STRING,
       };
+      // 与 HttpClient 保持一致的代理通道（含认证信息）
+      const usingProxy: connection.HttpProxy | undefined = HttpClient.instance.buildUsingProxy();
+      if (usingProxy !== undefined) {
+        opts.usingProxy = usingProxy;
+      }
       const resp: http.HttpResponse = await req.request(url, opts);
       if (resp.responseCode < 200 || resp.responseCode >= 300) {
         return null;

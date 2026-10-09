@@ -10,6 +10,8 @@ import { AuthStore } from '../storage/AuthStore';
 import { ErrorReportStore } from '../storage/ErrorReportStore';
 import { AppStorageKeys, DEFAULT_DOMAIN, ThemeMode, NavStyle, Breakpoint } from '../storage/AppStorageKeys';
 import { HttpClient } from '../api/HttpClient';
+import { ProxyStore } from '../api/ProxyStore';
+import { ProxyConfig, describeProxy } from '../api/ProxyConfig';
 import { AppStorageDomainFailover } from '../api/AppStorageDomainFailover';
 import { DomainManifest } from '../api/DomainManifest';
 import { Layout } from '../utils/Layout';
@@ -72,16 +74,13 @@ export default class EntryAbility extends UIAbility {
       // 注入域名漂移策略（解耦 HttpClient 与 AppStorage：失败重试时由它挑备用线路并回写生效域名）
       HttpClient.instance.setFailover(new AppStorageDomainFailover());
 
-      // 3.1) 读取并应用 HTTP 代理偏好
-      const proxyEnabled: boolean = await PreferencesStore.getBoolean('settings', AppStorageKeys.PROXY_ENABLED, false);
-      if (proxyEnabled) {
-        const proxyHost: string = await PreferencesStore.getString('settings', AppStorageKeys.PROXY_HOST, '');
-        const proxyPort: number = await PreferencesStore.getNumber('settings', AppStorageKeys.PROXY_PORT, 0);
-        if (proxyHost.length > 0 && proxyPort > 0) {
-          HttpClient.instance.setProxy(proxyHost, proxyPort);
-          Logger.i(TAG, `applied proxy: ${proxyHost}:${proxyPort}`);
-        }
-      }
+      // 3.1) 读取并应用应用内代理（协议 / 主机 / 端口 / 经 HUKS 加密的账号密码）
+      //      ProxyStore 依赖 SecretStore，必须在 1.2) 之后调用。
+      const proxyCfg: ProxyConfig = await ProxyStore.load();
+      HttpClient.instance.setProxyConfig(proxyCfg);
+      Logger.i(TAG, proxyCfg.enabled
+        ? `applied proxy: ${describeProxy(proxyCfg)}`
+        : 'applied proxy: (disabled)');
 
       // 3.2) 读取并应用首页内容地区偏好（注入 siteLanguageV2 cookie + Accept-Language）
       const contentLang: string = await PreferencesStore.getString('settings', AppStorageKeys.CONTENT_LANG, '');

@@ -20,9 +20,10 @@
  *   - Cloudflare Pages / Workers：`https://<sub>.pages.dev/domains.json`
  */
 
-import { http } from '@kit.NetworkKit';
+import { connection, http } from '@kit.NetworkKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { DOMAINS } from './Domains';
+import { HttpClient } from './HttpClient';
 import { PreferencesStore } from '../storage/PreferencesStore';
 import { AppStorageKeys } from '../storage/AppStorageKeys';
 import { Logger } from '../utils/Logger';
@@ -166,6 +167,11 @@ export class DomainManifest {
         readTimeout: FETCH_TIMEOUT_MS,
         expectDataType: http.HttpDataType.STRING,
       };
+      // 与 HttpClient 保持一致的代理通道（含认证信息）
+      const usingProxy: connection.HttpProxy | undefined = HttpClient.instance.buildUsingProxy();
+      if (usingProxy !== undefined) {
+        reqOpts.usingProxy = usingProxy;
+      }
       const resp: http.HttpResponse = await req.request(url, reqOpts);
       if (resp.responseCode < 200 || resp.responseCode >= 300) {
         Logger.w(TAG, `refresh http ${resp.responseCode}`);

@@ -10,12 +10,15 @@
  *   - Cloudflare 检测：抛 CfBlockedError，UI 决定是否提示换线。
  *   - JSON 自动解析：传 expectDataType=STRING，根据响应头 content-type 解析。
  *   - 网络错误归一为 NetworkError；4xx/5xx 抛 HttpStatusError。
+ *   - 应用内代理（ProxyConfig）：http/https 走 usingProxy（connection.HttpProxy 自带
+ *     username/password 完成代理认证）；socks5 走 RCP（RcpTransport）；
+ *     代理未启用时所有请求路径与引入代理功能前完全一致。
  *
  * 不在本类内做：下载（统一走 P3 的 DownloadVM + request.agent）；
  * 复杂 multipart 上传（暂不需要）。
  */
 
-import { http } from '@kit.NetworkKit';
+import { connection, http } from '@kit.NetworkKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { Logger } from '../utils/Logger';
 import { UrlUtils } from '../utils/UrlUtils';
@@ -24,6 +27,17 @@ import { DohResolver } from '../utils/DohResolver';
 import { CookieJar } from './CookieJar';
 import { CloudflareDetector } from './CloudflareDetector';
 import { DomainFailover } from './DomainFailover';
+import {
+  ProxyConfig,
+  emptyProxyConfig,
+  normalizeProxy,
+  isProxyUsable,
+  describeProxy,
+  supportsHttpModule,
+  toHttpProxy,
+  ProxyScheme,
+} from './ProxyConfig';
+import { RcpTransport, RawResponse } from './RcpTransport';
 import {
   ApiError,
   CfBlockedError,
@@ -144,9 +158,12 @@ export class HttpClient {
   /** 自动漂移使用的 "已尝试过" 域名集合，避免短时间内来回切换。 */
   private triedDomains: Set<string> = new Set<string>();
 
-  /** HTTP 代理（可选）。设置后所有 request / ping 均走代理。 */
-  private proxyHost: string = '';
-  private proxyPort: number = 0;
+  /**
+   * 应用内代理配置。null = 未启用 / 未配置（此时所有请求与改动前完全一致）。
+   * 协议为 http / https 时走 http 模块的 usingProxy（connection.HttpProxy 自带 username/password）；
+   * 协议为 socks5 时走 RCP（@kit.RemoteCommunicationKit）。
+   */
+  private proxy: ProxyConfig | null = null;
 
   /**
    * 站点语言偏好（LANGUAGE_FILTERS key，如 'chinese'/'english'/'all'）。
@@ -188,40 +205,106 @@ export class HttpClient {
   }
 
   /**
-   * 设置 HTTP 代理。host 为空串或 port<=0 表示不使用代理。
-   * 代理 URL 示例：127.0.0.1:7890 （Clash 本地端口）、vps.example.com:8080。
+   * 应用一整份代理配置（含协议与代理认证信息）。
+   * 配置不可用（未启用 / 缺 host / 端口非法）时等价于 clearProxy()。
    */
-  setProxy(host: string, port: number): void {
-    const cleanedHost: string = host.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
-    if (cleanedHost.length === 0 || port <= 0 || port > 65535) {
+  setProxyConfig(cfg: ProxyConfig): void {
+    const next: ProxyConfig = normalizeProxy(cfg);
+    if (!isProxyUsable(next)) {
       this.clearProxy();
       return;
     }
-    if (cleanedHost !== this.proxyHost || port !== this.proxyPort) {
-      Logger.i(TAG, `proxy set: ${cleanedHost}:${port}`);
-      this.proxyHost = cleanedHost;
-      this.proxyPort = port;
+    const prev: ProxyConfig | null = this.proxy;
+    const changed: boolean = prev === null
+      || prev.scheme !== next.scheme
+      || prev.host !== next.host
+      || prev.port !== next.port
+      || prev.username !== next.username
+      || prev.password !== next.password
+      || prev.connectTimeoutMs !== next.connectTimeoutMs;
+    if (changed) {
+      // describeProxy 已脱敏：密码不会进入日志
+      Logger.i(TAG, `proxy set: ${describeProxy(next)}`);
     }
+    this.proxy = next;
+  }
+
+  /** 当前生效的代理配置；未启用返回 null。 */
+  getProxyConfig(): ProxyConfig | null {
+    return this.proxy;
+  }
+
+  /**
+   * 设置 HTTP 代理（保留旧签名，仅 host + port）。
+   * 等价于「沿用当前协议与认证信息，只改 host/port」；host 为空或 port 非法视为关闭代理。
+   */
+  setProxy(host: string, port: number): void {
+    const base: ProxyConfig = this.proxy !== null ? this.proxy : emptyProxyConfig();
+    const cleanedHost: string = host.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const next: ProxyConfig = {
+      enabled: true,
+      scheme: base.scheme,
+      host: cleanedHost,
+      port: port,
+      username: base.username,
+      password: base.password,
+      connectTimeoutMs: base.connectTimeoutMs,
+    };
+    this.setProxyConfig(next);
+  }
+
+  /** 只改协议（保留 host / port / 凭证）。设置页切 http / https / socks5 胶囊时用。 */
+  setProxyScheme(scheme: ProxyScheme): void {
+    const base: ProxyConfig = this.proxy !== null ? this.proxy : emptyProxyConfig();
+    const next: ProxyConfig = {
+      enabled: true,
+      scheme: scheme,
+      host: base.host,
+      port: base.port,
+      username: base.username,
+      password: base.password,
+      connectTimeoutMs: base.connectTimeoutMs,
+    };
+    this.setProxyConfig(next);
   }
 
   clearProxy(): void {
-    if (this.proxyHost.length > 0) {
+    if (this.proxy !== null) {
       Logger.i(TAG, 'proxy cleared');
     }
-    this.proxyHost = '';
-    this.proxyPort = 0;
+    this.proxy = null;
   }
 
   hasProxy(): boolean {
-    return this.proxyHost.length > 0 && this.proxyPort > 0;
+    return this.proxy !== null && isProxyUsable(this.proxy);
   }
 
   getProxyHost(): string {
-    return this.proxyHost;
+    return this.proxy !== null ? this.proxy.host : '';
   }
 
   getProxyPort(): number {
-    return this.proxyPort;
+    return this.proxy !== null ? this.proxy.port : 0;
+  }
+
+  /**
+   * 给所有「不走 HttpClient.attemptOnce」的网络出口复用：
+   * 下载（requestInStream）、下载链接解析、远程 manifest 拉取、更新检查等。
+   * 返回 undefined 表示不需要设置（未启用代理，或 socks5——http 模块表达不了）。
+   */
+  buildUsingProxy(): connection.HttpProxy | undefined {
+    if (this.proxy === null || !isProxyUsable(this.proxy)) {
+      return undefined;
+    }
+    if (!supportsHttpModule(this.proxy)) {
+      return undefined;
+    }
+    return toHttpProxy(this.proxy);
+  }
+
+  /** 是否需要改走 RCP 传输（目前只有 socks5）。 */
+  shouldUseRcp(): boolean {
+    return this.proxy !== null && isProxyUsable(this.proxy) && !supportsHttpModule(this.proxy);
   }
 
   /**
@@ -320,28 +403,20 @@ export class HttpClient {
   async ping(domain: string, timeoutMs: number = 8000): Promise<number> {
     const cleanedDomain: string = domain.replace(/^https?:\/\//, '').replace(/\/$/, '');
     const url: string = `https://${cleanedDomain}/eapi/info/languages`;
-    const req: http.HttpRequest = http.createHttp();
+    const pingHeaders: Record<string, string> = { 'User-Agent': UA };
     const start: number = Date.now();
     try {
-      const pingHeaders: Record<string, string> = { 'User-Agent': UA };
-      const reqOpts: http.HttpRequestOptions = {
-        method: http.RequestMethod.GET,
-        header: pingHeaders,
-        connectTimeout: timeoutMs,
-        readTimeout: timeoutMs,
-        expectDataType: http.HttpDataType.STRING,
-      };
-      if (this.proxyHost.length > 0 && this.proxyPort > 0) {
-        reqOpts.usingProxy = {
-          host: this.proxyHost,
-          port: this.proxyPort,
-          exclusionList: [],
-        };
-      }
-      const resp: http.HttpResponse = await req.request(url, reqOpts);
+      const raw: RawResponse = await this.rawFetch(
+        url,
+        http.RequestMethod.GET,
+        pingHeaders,
+        undefined,
+        timeoutMs,
+        timeoutMs,
+      );
       const elapsed: number = Date.now() - start;
-      const body: string = typeof resp.result === 'string' ? resp.result : '';
-      const ok: boolean = resp.responseCode >= 200 && resp.responseCode < 300
+      const body: string = raw.body;
+      const ok: boolean = raw.statusCode >= 200 && raw.statusCode < 300
         && (body.indexOf('"success":1') >= 0
           || body.indexOf('"success": 1') >= 0
           || body.indexOf('"success":true') >= 0);
@@ -350,8 +425,6 @@ export class HttpClient {
       const e: BusinessError = err as BusinessError;
       Logger.d(TAG, `ping ${domain} failed: ${e.message}`);
       return -1;
-    } finally {
-      req.destroy();
     }
   }
 
@@ -451,7 +524,6 @@ export class HttpClient {
     body?: string,
     options?: HttpRequestOptions
   ): Promise<T> {
-    const req: http.HttpRequest = http.createHttp();
     try {
       const headers: Record<string, string> = {
         'User-Agent': pickUA(),
@@ -471,31 +543,23 @@ export class HttpClient {
 
       Logger.d(TAG, `${method} ${Redact.url(url)}`);
 
-      const reqOpts: http.HttpRequestOptions = {
+      const raw: RawResponse = await this.rawFetch(
+        url,
         method,
-        header: headers,
-        extraData: body,
-        connectTimeout: options?.connectTimeoutMs ?? 10000,
-        readTimeout: options?.readTimeoutMs ?? 30000,
-        expectDataType: http.HttpDataType.STRING,
-      };
-      if (this.proxyHost.length > 0 && this.proxyPort > 0) {
-        reqOpts.usingProxy = {
-          host: this.proxyHost,
-          port: this.proxyPort,
-          exclusionList: [],
-        };
-      }
-      const resp: http.HttpResponse = await req.request(url, reqOpts);
+        headers,
+        body,
+        options?.connectTimeoutMs ?? 10000,
+        options?.readTimeoutMs ?? 30000,
+      );
 
       // 解析 set-cookie 入 jar（同域或上游 reader 域我们都收下）
-      this.cookieJar.captureFrom(resp.header as Record<string, string | string[]>);
+      this.cookieJar.captureFrom(raw.headers);
 
-      const status: number = resp.responseCode;
-      const text: string = typeof resp.result === 'string' ? resp.result : '';
+      const status: number = raw.statusCode;
+      const text: string = raw.body;
 
       // Cloudflare 检测优先于状态码
-      if (CloudflareDetector.isBlocked(status, text, resp.header as Record<string, string | string[]>)) {
+      if (CloudflareDetector.isBlocked(status, text, raw.headers)) {
         throw new CfBlockedError();
       }
 
@@ -526,6 +590,59 @@ export class HttpClient {
       const msg: string = e.message !== undefined && e.message !== null ? e.message : 'network_error';
       Logger.w(TAG, `request error ${url}: ${msg}`);
       throw new NetworkError(msg);
+    }
+  }
+
+  /**
+   * 统一的「取原始响应」出口——所有代理分支都收敛在这里，业务判定逻辑只写一份。
+   *
+   *   - 未启用代理：与改动前完全相同的 http 模块调用（不设置 usingProxy）。
+   *   - http / https 代理：http 模块 + usingProxy；connection.HttpProxy 自 API 12 起
+   *     支持 username / password，代理认证由系统栈完成，无需手写 Proxy-Authorization。
+   *   - socks5 代理：http 模块无协议概念，改走 RCP（RcpTransport）。
+   */
+  private async rawFetch(
+    url: string,
+    method: http.RequestMethod,
+    headers: Record<string, string>,
+    body: string | undefined,
+    connectMs: number,
+    readMs: number
+  ): Promise<RawResponse> {
+    const activeProxy: ProxyConfig | null = this.proxy;
+    if (activeProxy !== null && this.shouldUseRcp()) {
+      return await RcpTransport.fetch({
+        url: url,
+        method: method === http.RequestMethod.POST ? 'POST' : 'GET',
+        headers: headers,
+        body: body,
+        connectMs: connectMs,
+        transferMs: readMs,
+        proxy: activeProxy,
+      });
+    }
+
+    const req: http.HttpRequest = http.createHttp();
+    try {
+      const reqOpts: http.HttpRequestOptions = {
+        method,
+        header: headers,
+        extraData: body,
+        connectTimeout: connectMs,
+        readTimeout: readMs,
+        expectDataType: http.HttpDataType.STRING,
+      };
+      const usingProxy: connection.HttpProxy | undefined = this.buildUsingProxy();
+      if (usingProxy !== undefined) {
+        reqOpts.usingProxy = usingProxy;
+      }
+      const resp: http.HttpResponse = await req.request(url, reqOpts);
+      const out: RawResponse = {
+        statusCode: resp.responseCode,
+        headers: resp.header as Record<string, string | string[]>,
+        body: typeof resp.result === 'string' ? resp.result : '',
+      };
+      return out;
     } finally {
       req.destroy();
     }

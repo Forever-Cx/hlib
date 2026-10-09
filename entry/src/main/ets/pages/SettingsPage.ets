@@ -29,6 +29,14 @@ import { DownloadHistoryStore } from '../storage/DownloadHistoryStore';
 import { ReadingPositionStore } from '../storage/ReadingPositionStore';
 import { HttpClient } from '../api/HttpClient';
 import { DomainManifest } from '../api/DomainManifest';
+import {
+  ProxyConfig,
+  ProxyScheme,
+  ProxyErrorKind,
+  PROXY_DEFAULT_TIMEOUT_MS,
+} from '../api/ProxyConfig';
+import { ProxyStore } from '../api/ProxyStore';
+import { ProxyTester, ProxyTestResult } from '../api/ProxyTester';
 import { PreferencesStore } from '../storage/PreferencesStore';
 import { DomainSelectorDialog } from '../components/DomainSelectorDialog';
 import { CustomDomainDialog } from '../components/CustomDomainDialog';
@@ -59,8 +67,14 @@ export struct SettingsPage {
 
   // ── 网络加固：代理与 Manifest UI 状态 ──
   @State private proxyEnabled: boolean = false;
+  @State private proxyScheme: ProxyScheme = 'http';
   @State private proxyHost: string = '';
   @State private proxyPortStr: string = '';
+  /** 代理认证账号 / 密码：仅 UI 与内存态使用，写盘前经 SecretStore 加密。 */
+  @State private proxyUsername: string = '';
+  @State private proxyPassword: string = '';
+  @State private proxyTesting: boolean = false;
+  @State private proxyTestHint: string = '';
   @State private manifestEnabled: boolean = false;
   @State private manifestUrl: string = '';
   @State private manifestVersion: string = '';
@@ -85,10 +99,14 @@ export struct SettingsPage {
   }
 
   private async loadNetworkPrefs(): Promise<void> {
-    this.proxyEnabled = await PreferencesStore.getBoolean('settings', AppStorageKeys.PROXY_ENABLED, false);
-    this.proxyHost = await PreferencesStore.getString('settings', AppStorageKeys.PROXY_HOST, '');
-    const port: number = await PreferencesStore.getNumber('settings', AppStorageKeys.PROXY_PORT, 0);
-    this.proxyPortStr = port > 0 ? port.toString() : '';
+    // 代理配置（账号密码在 ProxyStore 内部解密）
+    const proxyCfg: ProxyConfig = await ProxyStore.load();
+    this.proxyEnabled = proxyCfg.enabled;
+    this.proxyScheme = proxyCfg.scheme;
+    this.proxyHost = proxyCfg.host;
+    this.proxyPortStr = proxyCfg.port > 0 ? proxyCfg.port.toString() : '';
+    this.proxyUsername = proxyCfg.username;
+    this.proxyPassword = proxyCfg.password;
 
     this.manifestEnabled = DomainManifest.isEnabled();
     this.manifestUrl = DomainManifest.getUrl();
@@ -649,6 +667,22 @@ export struct SettingsPage {
     .borderRadius(AppRadius.md);
   }
 
+  /** 代理协议胶囊（沿用本页语言 / 导航样式的胶囊写法）。 */
+  @Builder
+  private proxySchemePill(value: ProxyScheme, label: string) {
+    Button() {
+      Text(label)
+        .fontSize(AppFontSize.bodySm)
+        .fontWeight(this.proxyScheme === value ? FontWeight.Bold : FontWeight.Regular)
+        .fontColor(this.proxyScheme === value ? AppColors.textOnPrimary : AppColors.textPrimary);
+    }
+    .layoutWeight(1)
+    .height(36)
+    .backgroundColor(this.proxyScheme === value ? AppColors.brandPrimary : AppColors.surfaceAlt)
+    .borderRadius(AppRadius.sm)
+    .onClick(() => this.setProxyScheme(value));
+  }
+
   @Builder
   private proxyCard() {
     Column({ space: 12 }) {
@@ -667,8 +701,25 @@ export struct SettingsPage {
       }
       .width('100%');
 
-      // 启用时展开 host / port 输入
+      // 启用时展开：协议 / 主机 / 端口 / 账号 / 密码 + 保存 + 测试
       if (this.proxyEnabled) {
+        // 协议
+        Column({ space: 6 }) {
+          Text($r('app.string.settings_proxy_scheme'))
+            .fontSize(AppFontSize.caption)
+            .fontColor(AppColors.textSecondary)
+            .alignSelf(ItemAlign.Start);
+          Row({ space: 8 }) {
+            this.proxySchemePill('http', 'HTTP');
+            this.proxySchemePill('https', 'HTTPS');
+            this.proxySchemePill('socks5', 'SOCKS5');
+          }
+          .width('100%');
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start);
+
+        // 主机 + 端口
         Row({ space: 8 }) {
           Column({ space: 4 }) {
             Text($r('app.string.settings_proxy_host'))
@@ -680,9 +731,7 @@ export struct SettingsPage {
               .backgroundColor(AppColors.surfaceAlt)
               .fontSize(AppFontSize.bodySm)
               .onChange((v: string): void => {
-                this.setProxyHost(v).catch((e: Object): void => {
-                  Logger.w(TAG, `setProxyHost: ${(e as Error).message}`);
-                });
+                this.setProxyHost(v);
               });
           }
           .layoutWeight(2)
@@ -699,15 +748,89 @@ export struct SettingsPage {
               .backgroundColor(AppColors.surfaceAlt)
               .fontSize(AppFontSize.bodySm)
               .onChange((v: string): void => {
-                this.setProxyPort(v).catch((e: Object): void => {
-                  Logger.w(TAG, `setProxyPort: ${(e as Error).message}`);
-                });
+                this.setProxyPort(v);
               });
           }
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start);
         }
         .width('100%');
+
+        // 账号 + 密码（密码框默认掩码显示）
+        Row({ space: 8 }) {
+          Column({ space: 4 }) {
+            Text($r('app.string.settings_proxy_username'))
+              .fontSize(AppFontSize.caption)
+              .fontColor(AppColors.textSecondary);
+            TextInput({ placeholder: $r('app.string.settings_proxy_username_hint'), text: this.proxyUsername })
+              .height(40)
+              .borderRadius(AppRadius.sm)
+              .backgroundColor(AppColors.surfaceAlt)
+              .fontSize(AppFontSize.bodySm)
+              .onChange((v: string): void => {
+                this.setProxyUsername(v);
+              });
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start);
+
+          Column({ space: 4 }) {
+            Text($r('app.string.settings_proxy_password'))
+              .fontSize(AppFontSize.caption)
+              .fontColor(AppColors.textSecondary);
+            TextInput({ placeholder: $r('app.string.settings_proxy_password_hint'), text: this.proxyPassword })
+              .type(InputType.Password)
+              .height(40)
+              .borderRadius(AppRadius.sm)
+              .backgroundColor(AppColors.surfaceAlt)
+              .fontSize(AppFontSize.bodySm)
+              .onChange((v: string): void => {
+                this.setProxyPassword(v);
+              });
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start);
+        }
+        .width('100%');
+
+        // 保存配置 / 测试连通性
+        Row({ space: 8 }) {
+          Button($r('app.string.settings_proxy_save'))
+            .layoutWeight(1)
+            .height(36)
+            .fontSize(AppFontSize.bodySm)
+            .backgroundColor(AppColors.brandPrimaryLight)
+            .fontColor(AppColors.brandPrimary)
+            .borderRadius(AppRadius.sm)
+            .onClick((): void => {
+              this.saveProxy().catch((e: Object): void => {
+                Logger.w(TAG, `saveProxy: ${(e as Error).message}`);
+              });
+            });
+          Button($r('app.string.settings_proxy_test'))
+            .layoutWeight(1)
+            .height(36)
+            .fontSize(AppFontSize.bodySm)
+            .backgroundColor(AppColors.surfaceAlt)
+            .fontColor(AppColors.textPrimary)
+            .borderRadius(AppRadius.sm)
+            .enabled(!this.proxyTesting)
+            .onClick((): void => {
+              this.testProxy().catch((e: Object): void => {
+                Logger.w(TAG, `testProxy: ${(e as Error).message}`);
+              });
+            });
+        }
+        .width('100%');
+
+        if (this.proxyTestHint.length > 0) {
+          Text(this.proxyTestHint)
+            .fontSize(AppFontSize.caption)
+            .fontColor(AppColors.textTertiary)
+            .alignSelf(ItemAlign.Start)
+            .maxLines(3)
+            .textOverflow({ overflow: TextOverflow.Ellipsis });
+        }
 
         Text($r('app.string.settings_proxy_note'))
           .fontSize(AppFontSize.caption)
@@ -958,33 +1081,120 @@ export struct SettingsPage {
 
   // ── 代理设置 Actions ──
 
+  /** 把当前界面输入组装成一份代理配置（不写盘）。 */
+  private buildProxyDraft(): ProxyConfig {
+    const n: number = parseInt(this.proxyPortStr, 10);
+    const port: number = isNaN(n) ? 0 : n;
+    const draft: ProxyConfig = {
+      enabled: this.proxyEnabled,
+      scheme: this.proxyScheme,
+      host: this.proxyHost,
+      port: port,
+      username: this.proxyUsername,
+      password: this.proxyPassword,
+      connectTimeoutMs: PROXY_DEFAULT_TIMEOUT_MS,
+    };
+    return draft;
+  }
+
+  /** 总开关：即时写盘并生效（开关是用户最直觉的"立刻切换"动作）。 */
   private async toggleProxy(on: boolean): Promise<void> {
     this.proxyEnabled = on;
-    await PreferencesStore.putBoolean('settings', AppStorageKeys.PROXY_ENABLED, on);
-    this.applyProxyToHttpClient();
+    this.proxyTestHint = '';
+    const draft: ProxyConfig = this.buildProxyDraft();
+    await ProxyStore.save(draft);
+    HttpClient.instance.setProxyConfig(draft);
   }
 
-  private async setProxyHost(v: string): Promise<void> {
-    this.proxyHost = v;
-    await PreferencesStore.putString('settings', AppStorageKeys.PROXY_HOST, v);
-    this.applyProxyToHttpClient();
-  }
-
-  private async setProxyPort(v: string): Promise<void> {
-    this.proxyPortStr = v;
-    const n: number = parseInt(v, 10);
-    const port: number = isNaN(n) ? 0 : n;
-    await PreferencesStore.putNumber('settings', AppStorageKeys.PROXY_PORT, port);
-    this.applyProxyToHttpClient();
-  }
-
-  private applyProxyToHttpClient(): void {
-    const port: number = parseInt(this.proxyPortStr, 10);
-    if (this.proxyEnabled && this.proxyHost.length > 0 && !isNaN(port) && port > 0) {
-      HttpClient.instance.setProxy(this.proxyHost, port);
-    } else {
-      HttpClient.instance.clearProxy();
+  /** 切换协议（只改内存态，点「保存配置」才落盘）。 */
+  private setProxyScheme(scheme: ProxyScheme): void {
+    if (scheme === this.proxyScheme) {
+      return;
     }
+    this.proxyScheme = scheme;
+    this.proxyTestHint = '';
+  }
+
+  private setProxyHost(v: string): void {
+    this.proxyHost = v;
+  }
+
+  private setProxyPort(v: string): void {
+    this.proxyPortStr = v;
+  }
+
+  private setProxyUsername(v: string): void {
+    this.proxyUsername = v;
+  }
+
+  private setProxyPassword(v: string): void {
+    this.proxyPassword = v;
+  }
+
+  /** 保存配置：账号密码加密落盘 + 立即应用到 HttpClient。 */
+  private async saveProxy(): Promise<void> {
+    const draft: ProxyConfig = this.buildProxyDraft();
+    await ProxyStore.save(draft);
+    HttpClient.instance.setProxyConfig(draft);
+    this.proxyTestHint = '';
+    SettingsPage.toastResource($r('app.string.settings_proxy_saved'));
+  }
+
+  /**
+   * 测试连通性：用界面上当前这份配置（未保存也能测）访问当前镜像域的探针接口。
+   * 结果同时以 toast + 卡片内文案呈现，并按失败原因分类提示。
+   */
+  private async testProxy(): Promise<void> {
+    if (this.proxyTesting) {
+      return;
+    }
+    this.proxyTesting = true;
+    this.proxyTestHint = I18n.ts('settings_proxy_testing');
+    try {
+      const draft: ProxyConfig = this.buildProxyDraft();
+      // 测试时强制按"启用"处理：即便总开关还关着，也要能验证这份配置本身能不能用
+      draft.enabled = true;
+      const domain: string = HttpClient.instance.getDomain();
+      const target: string = `https://${domain}/eapi/info/languages`;
+      const r: ProxyTestResult = await ProxyTester.test(draft, target);
+      this.proxyTestHint = SettingsPage.proxyTestMessage(r);
+      SettingsPage.toast(this.proxyTestHint);
+    } catch (e) {
+      Logger.w(TAG, `testProxy failed: ${(e as Error).message}`);
+      this.proxyTestHint = I18n.ts('settings_proxy_err_connect');
+      SettingsPage.toast(this.proxyTestHint);
+    } finally {
+      this.proxyTesting = false;
+    }
+  }
+
+  /** 把测试结果翻译成面向用户的文案（区分认证失败 / 不可达 / 超时 / 解析失败等）。 */
+  private static proxyTestMessage(r: ProxyTestResult): string {
+    if (r.ok) {
+      return I18n.format('settings_proxy_test_ok_fmt', [r.latencyMs]);
+    }
+    const kind: ProxyErrorKind = r.kind;
+    if (kind === 'invalid') {
+      return I18n.ts('settings_proxy_err_invalid');
+    }
+    if (kind === 'auth') {
+      return I18n.ts('settings_proxy_err_auth');
+    }
+    if (kind === 'timeout') {
+      return I18n.ts('settings_proxy_err_timeout');
+    }
+    if (kind === 'dns') {
+      return I18n.ts('settings_proxy_err_dns');
+    }
+    if (kind === 'unsupported') {
+      return I18n.ts('settings_proxy_err_unsupported');
+    }
+    if (kind === 'connect') {
+      return I18n.ts('settings_proxy_err_connect');
+    }
+    return r.detail.length > 0
+      ? I18n.format('settings_proxy_err_unknown_fmt', [r.detail])
+      : I18n.ts('settings_proxy_err_connect');
   }
 
   // ── 镜像同步 Actions ──

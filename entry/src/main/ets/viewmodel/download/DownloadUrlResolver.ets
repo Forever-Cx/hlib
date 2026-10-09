@@ -6,7 +6,7 @@
  * 日志统一经 Redact 脱敏，避免签名 token 进 hilog。
  */
 
-import { http } from '@kit.NetworkKit';
+import { connection, http } from '@kit.NetworkKit';
 import { HttpClient } from '../../api/HttpClient';
 import { Logger } from '../../utils/Logger';
 import { Redact } from '../../utils/Redact';
@@ -59,12 +59,10 @@ export class DownloadUrlResolver {
         readTimeout: 15000,
         expectDataType: http.HttpDataType.STRING,
       };
-      if (HttpClient.instance.hasProxy()) {
-        opts.usingProxy = {
-          host: HttpClient.instance.getProxyHost(),
-          port: HttpClient.instance.getProxyPort(),
-          exclusionList: [],
-        };
+      // 代理：与 HttpClient 保持一致的通道（含代理认证信息）
+      const usingProxy: connection.HttpProxy | undefined = HttpClient.instance.buildUsingProxy();
+      if (usingProxy !== undefined) {
+        opts.usingProxy = usingProxy;
       }
       const resp: http.HttpResponse = await req.request(fileApiUrl, opts);
       const status: number = resp.responseCode;

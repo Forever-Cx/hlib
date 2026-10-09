@@ -14,6 +14,14 @@ export class AppStorageKeys {
   static readonly PROXY_ENABLED: string          = 'pref_proxyEnabled';        // boolean
   static readonly PROXY_HOST: string             = 'pref_proxyHost';           // string，例 '127.0.0.1'
   static readonly PROXY_PORT: string             = 'pref_proxyPort';           // number
+  /** 代理协议：'http' | 'https' | 'socks5'（缺省按 'http' 处理，兼容旧版本数据）。 */
+  static readonly PROXY_SCHEME: string           = 'pref_proxyScheme';
+  /** 代理认证账号（SecretStore 加密后的密文，"sec1:" 前缀）。 */
+  static readonly PROXY_USERNAME: string         = 'pref_proxyUsername';
+  /** 代理认证密码（SecretStore 加密后的密文，"sec1:" 前缀）。禁止明文落盘/落日志。 */
+  static readonly PROXY_PASSWORD: string         = 'pref_proxyPassword';
+  /** 代理连接超时（ms），用于连通性测试与代理通道下的请求。 */
+  static readonly PROXY_TIMEOUT_MS: string       = 'pref_proxyTimeoutMs';
   static readonly DOH_ENABLED: string            = 'pref_dohEnabled';          // boolean，是否走 DoH 解析
   static readonly DOMAIN_MANIFEST_ENABLED: string = 'pref_domainManifestEnabled'; // boolean
   static readonly DOMAIN_MANIFEST_URL: string     = 'pref_domainManifestUrl';     // 远程镜像列表 URL

@@ -23,7 +23,7 @@
  *   - http.HttpRequest 实例仅活在内存（Map<bookId, HttpRequest>），重启丢失（MVP 接受）
  */
 
-import { http } from '@kit.NetworkKit';
+import { connection, http } from '@kit.NetworkKit';
 import common from '@ohos.app.ability.common';
 import { Want, wantConstant } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -319,13 +319,10 @@ export class DownloadVM {
       connectTimeout: 30000, // 30s 连接超时
       expectDataType: http.HttpDataType.ARRAY_BUFFER,
     };
-    // 代理：与 HttpClient.attemptOnce 保持一致
-    if (HttpClient.instance.hasProxy()) {
-      opts.usingProxy = {
-        host: HttpClient.instance.getProxyHost(),
-        port: HttpClient.instance.getProxyPort(),
-        exclusionList: [],
-      };
+    // 代理：与 HttpClient 保持一致的通道（含代理认证信息）
+    const usingProxy: connection.HttpProxy | undefined = HttpClient.instance.buildUsingProxy();
+    if (usingProxy !== undefined) {
+      opts.usingProxy = usingProxy;
     }
 
     req.requestInStream(absoluteUrl, opts, (err: Error | null | undefined, code: number): void => {
